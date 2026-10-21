@@ -36,7 +36,7 @@ A Wick-flavored memory audit. Memory files are a garden, not a filing cabinet �
 ## memory/[file].md
 
 - **Duplicate** — entries A (line X) and B (line Y) cover the same fact. Propose: merge preserving date range.
-- **Stale** — entry C (line Z) superseded by entry D. Propose: remove C.
+- **Stale** — entry C (line Z) superseded by entry D. Propose: mark C superseded by D (`node tools/wick-supersede.mjs <C's id> ...`, `MEMORY-PROTOCOL.md` §14). Never delete it: retrieval skips it and the history stays. (Deleting on request is `/forget`, with a tombstone.)
 - **Conflict** — entry E vs F contradict on [point]. User, please reconcile.
 - **Consolidate** — G, H, I are variations on one theme. Propose: single merged entry.
 
