@@ -22,12 +22,17 @@
 //   node tools/wick-ask.mjs --dry "..."            retrieval only - no model call
 //   node tools/wick-ask.mjs --json "..."           one JSON object: {answer, refused, files, sources}
 //   node tools/wick-ask.mjs --model llama3.1:8b "..."     any ollama model (the measurement above is qwen2.5:7b)
+//   node tools/wick-ask.mjs --include-superseded "..."  also read entries tagged [superseded: ...] (history)
 // WICK_MEMORY=<dir> points it at another memory layer; OLLAMA_HOST overrides http://127.0.0.1:11434.
+//
+// SUPERSEDED ENTRIES (2026-10-20, MEMORY-PROTOCOL.md §14). A fact tagged [superseded: <date> → <id>] stopped being
+// true, so it is neither routed on nor offered as a source unless you pass --include-superseded. Memory with no tag in
+// it reaches step 2 byte for byte as it did when the pipeline above was measured.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { load, rank, tok, MEM } from './wick-recall.mjs';
+import { load, rank, tok, MEM, activeText } from './wick-recall.mjs';
 
 const CHUNK = 600;
 const SYSTEM = 'You answer questions from the sources you are given, briefly and honestly.';
@@ -89,11 +94,13 @@ export function bm25Top(query, cands, k = 3, k1 = 1.5, b = 0.75) {
   return sc.slice(0, k).map(x => x.i).sort((a, c) => a - c).map(i => i);
 }
 
-export function retrieve(question) {
-  const files = rank(question, load(), 2).map(h => h.d.path);
+export function retrieve(question, { includeSuperseded = false } = {}) {
+  const files = rank(question, load({ includeSuperseded }), 2).map(h => h.d.path);
   const cands = [], origin = [];
   for (const f of files) {
-    for (const c of chunks(fs.readFileSync(path.join(MEM, f), 'utf8'))) { cands.push(c); origin.push(f); }
+    // Only the ACTIVE text of a routed file is cut into sources: a superseded entry is the fact that was replaced.
+    const text = activeText(f, fs.readFileSync(path.join(MEM, f), 'utf8'), { includeSuperseded });
+    for (const c of chunks(text)) { cands.push(c); origin.push(f); }
   }
   const idx = cands.length ? bm25Top(question, cands) : [];
   return { files, sources: idx.map(i => cands[i]), where: idx.map(i => origin[i]) };
@@ -120,7 +127,8 @@ async function main() {
   const mi = args.indexOf('--model');
   if (mi !== -1) { model = args[mi + 1]; args.splice(mi, 2); }
   const dry = flag('--dry'), json = flag('--json'), showSources = flag('--sources');
-  const usage = 'usage: node tools/wick-ask.mjs [--sources] [--dry] [--json] [--model M] "<question>"';
+  const includeSuperseded = flag('--include-superseded');
+  const usage = 'usage: node tools/wick-ask.mjs [--sources] [--dry] [--json] [--model M] [--include-superseded] "<question>"';
   if (flag('--help') || flag('-h')) { console.log(usage); process.exit(0); }
   // An unknown flag is an error, not part of the question: `--help` used to be sent to the model as a question,
   // loading a 7B onto the GPU to answer it.
@@ -131,7 +139,7 @@ async function main() {
     console.log(usage);
     process.exit(1);
   }
-  const r = retrieve(question);
+  const r = retrieve(question, { includeSuperseded });
   if (dry) {
     console.log(`files: ${r.files.join(', ') || '(no match)'}`);
     r.sources.forEach((s, i) => console.log(`\n[${r.where[i]}]\n${s}`));
