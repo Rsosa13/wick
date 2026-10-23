@@ -1,6 +1,6 @@
 # Wick — The Flame-Carrier
 
-*Updated: 2026-09-30 · first written 2026-04-20*
+*Updated: 2026-10-20 · first written 2026-04-20*
 ### Drop-In Thinking Partner for Claude Code
 
 *Named for the wick that carries the flame. Without it, the wax is just wax. Wick turns a language model into a persistent thinking partner with memory, frameworks, and character.*
@@ -197,8 +197,10 @@ Session 1 is dramatically better than vanilla Claude. Session 30 is dramatically
 | `memory/toolchain.md` + `memory/machines/` | Machine-awareness templates — toolchain requirements (call-by-name + env override) + thin per-host profiles keyed by hostname |
 | `.claude/skills/` | On-demand skills — consolidate-memory, code-review, security-review, simplify, tldr, red-team, base-rate, research, catalog, changelog-summary, migrate, automate (12 skills, spec-compliant per agentskills.io) |
 | `benchmark/` | Seed tasks + external-benchmark docs — targets GAIA2, Inspect AI (UK AISI), galileo-ai/agent-leaderboard |
-| `tools/wick-recall.mjs` | Zero-model-token memory router — names the 1–2 files that answer a question (BM25 over index rows + headers + bold lead-ins), ~1 ms |
+| `tools/wick-recall.mjs` | Zero-model-token memory router — names the 1–2 files that answer a question (BM25 over index rows + headers + bold lead-ins), ~1 ms. For long files, `--index` lists the matching *entries*, one line each (8 by default) and `--get <id>` reads only those (MEMORY-PROTOCOL.md §14) |
 | `tools/wick-ask.mjs` | Ask your memory a question and get the answer *from it* — or a plain "memory doesn't hold this". Router → paragraph chunks → a local model via ollama; no API key, no spend. Measured: 17/24 answerable right, 24/24 unanswerable refused (MEMORY-PROTOCOL.md §9) |
+| `tools/wick-supersede.mjs` | Retire a fact that changed without erasing it — writes the new entry and tags the old one `[superseded: <date> → <id>]`; recall and ask skip it unless `--include-superseded` (MEMORY-PROTOCOL.md §14) |
+| `tools/wick-selfcheck.mjs` | End-to-end checks for stepwise retrieval and superseding: throwaway memory layers, the real CLIs, no dependencies, no model |
 | `tools/wick-release-check.mjs` | Release gate — every surface that names the version (wick-meta, CHANGELOG, README, git tag; `--site` adds the build script + download page) must agree, or it exits 1 |
 | `tools/wick-scrub.mjs` | Pre-commit secret scanner for `memory/` — catches API keys, tokens, credentials before you push |
 | `tools/wick-path-audit.mjs` | Pre-commit absolute-path scanner — flags non-portable paths in `memory/` + config before the folder moves |

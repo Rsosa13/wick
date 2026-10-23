@@ -1,6 +1,71 @@
 # Wick Changelog
 
-*Updated: 2026-10-03 · first written 2026-04-20*
+*Updated: 2026-10-20 · first written 2026-04-20*
+
+## Unreleased — Read a long memory one entry at a time; retire a fact without erasing it
+
+Two mechanisms, one new section (MEMORY-PROTOCOL.md §14). **`wick-recall --index` / `--get`** reads memory in two
+steps: a short list of matching entries, then the full text of only the ones chosen. **`[superseded: <date> → <id>]`**
+marks a fact that was true and stopped being true; every reader skips it by default and `--include-superseded` brings
+it back. **`tools/wick-supersede.mjs`** writes both halves. Memory with no tag in it reads byte for byte as before.
+
+### Stepwise retrieval: a small index, then only the entries you choose
+
+**Why.** §13 measured that size buries a memory: facts recovered 100% of the time from a 150-line slice were recovered
+17% of the time inside the 551-line file they came from. The router names files, and a long file is the problem.
+
+**What.** An entry is a heading's section, or a top-level bullet that starts with its date, as §10 already asks a log
+to be written. A dated field inside a record (`- **Review date:** ...`) stays with its record, and a template's
+example inside a comment is not an entry. Each entry gets an id, `<file>#<slug of its title>`.
+`wick-recall --index "<question>"` runs the existing router, then ranks the entries inside the routed files and prints
+one line each (`-n`, default 8). `wick-recall --get <id> ...` prints just those entries. This is claude-mem's
+index-then-records pattern without its timeline step: in an append-only file, an entry's date and position already
+order it.
+
+**Measured with the new self-check, on generated text.** Across 30,600 entries in 121 files (3.0 MB), step 1 printed
+at most 1,422 bytes and 8 rows for each of 5 questions. A one-row-per-entry index of the same layer would be 5.3 MB. A
+fact planted at line 55 of a 604-line file was the top row of step 1, and step 2 returned it alone. **Not measured:**
+the recall of the entry ranking on a labelled query set. Step 1 inherits the router's reach, and the router does not
+read bullet prose: 1 of the 5 questions routed nowhere.
+
+### Superseded, not deleted
+
+**The tags are inline on the entry, like `[patch:]`** (§11): one file holds many entries, and memory files have no
+frontmatter. Valid-from is the entry's own date. Invalid-at and superseded-by are in `[superseded: <date> → <id>]`.
+The replacement carries `[supersedes: <id>]`. **No tag means active**, so no existing file needs to change. A tag on a
+heading retires the section under it. A tag in a code span, a fence or a comment is documentation.
+
+**`tools/wick-supersede.mjs` (new).** `<old-id> "<new fact>"` writes the new entry straight after the old one, in its
+shape (same bullet and date wrapper, or same heading level and separator). It tags both entries, and it moves the
+file's `Updated` stamp and its index row. `--by <new-id>` links an entry that already exists, and `--dry` writes
+nothing. It refuses, writing nothing, for: an entry already superseded, a future date, an id outside `memory/`, and an
+edit that would rename an existing entry. A new slug equal to a later entry's would push that one to `-2` and re-point
+every reference to it, and the self-check exercises that case. A superseded heading entry's replacement gets a
+`**Replaces:**` line, because `wick-ask` drops bare-heading blocks. Without it, a one-line decision would have vanished
+from `wick-ask` while the decision it replaced was hidden. That was found by reading the self-check's output, not by
+an assertion.
+
+**Hidden by default, everywhere.** The router leaves superseded text off its surface. `--index` does not list it.
+`--get` on a superseded id follows the chain to the current entry and says so. `wick-ask` never offers it as a source.
+`--include-superseded` works on `wick-recall` and `wick-ask`. Nothing auto-supersedes; age is never the reason (§10).
+
+### Compatibility
+
+- **Untagged memory is unchanged.** On three untagged layers (the shipped templates, a 4-file fixture, the 121-file
+  synthetic layer), v1.8.1's `wick-recall` and `wick-ask` and this branch's printed identical output in 90 of 90 runs:
+  30 questions × `wick-recall -k 2`, `-k 3`, `wick-ask --dry`. `wick-ask`'s measured pipeline (§9) is untouched for
+  such memory, and it was not re-measured on tagged memory.
+- **One behaviour change:** an unknown flag to `wick-recall` is now an error (exit 2) instead of a word of the query,
+  the rule `wick-ask` adopted in v1.8.1. A mistyped `--include-superseded` would otherwise have searched for itself.
+- **`CLAUDE.md` / `WICK.md`:** "Append, don't overwrite" now says to supersede a changed fact rather than edit it away.
+  `memory/index.md` names the two-step path.
+
+### Self-check
+
+**`tools/wick-selfcheck.mjs` (new): 37 checks, no dependencies, no model.** It builds throwaway memory layers in the OS
+temp directory and runs the real CLIs against them. It covers backward compatibility, entry parsing, the supersede
+flow (including every refusal leaving the disk byte-identical, and a CRLF file staying CRLF), hiding by default, and
+the step-1 size bound.
 
 ## v1.8.1 (2026-10-03) — A secret scanner that reads words, and a CLI that knows its flags
 

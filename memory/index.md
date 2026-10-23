@@ -1,6 +1,6 @@
 # Memory Index
 
-*Updated: 2026-08-01 · first written 2026-08-01*
+*Updated: 2026-10-20 · first written 2026-08-01*
 
 The map of this agent's memory. **Read this first, then open only the file(s) you need** — do not
 load the whole layer to answer one question. That is the context bulge, and it is avoidable.
@@ -8,6 +8,10 @@ load the whole layer to answer one question. That is the context bulge, and it i
 **Faster path (zero model tokens):** `node tools/wick-recall.mjs "<what you need>"` names the top
 file(s) directly, so you can skip reading this index and reasoning about it. Routing is *lookup*,
 not judgment.
+
+**Long files:** `node tools/wick-recall.mjs --index "<what you need>"` lists the matching *entries*,
+one line each (8 by default), and `--get <id>` reads only the ones you pick. An entry tagged
+`[superseded: …]` is skipped unless you pass `--include-superseded` (MEMORY-PROTOCOL.md §14).
 
 > **Authoring rule — the index row IS the routing surface.**
 > Each row below is what both a human *and* the router match against. Write it for **retrieval**,

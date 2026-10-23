@@ -1,6 +1,6 @@
 # Wick Memory Protocol — The Single-Writer Rule
 
-*Updated: 2026-09-29 · first written 2026-06-27*
+*Updated: 2026-10-20 · first written 2026-06-27*
 
 **For:** anyone running Wick inside a host that keeps its *own* memory (Claude Code's
 auto-memory, Cursor's memory, IDE-level "project memory"). This is the layer below
@@ -239,6 +239,7 @@ No API key, no spend, and nothing leaves the machine.
   - Chunk lengths count code points, and line endings are normalised, so a Windows checkout chunks exactly like Linux.
     Both were found while measuring this tool: the port first diverged from the measured pipeline on one block because
     of each.
+  - An entry tagged superseded (§14) is never a source unless you pass `--include-superseded`.
 
 ---
 
@@ -346,7 +347,8 @@ a read failure must never be reported as a clean scan.
 Do **not** let anything auto-expire, auto-archive, or down-rank a memory because it is old. A fact
 from March can be perfectly true; a note from yesterday can be wrong. `wick-consolidate-memory`
 judges staleness **by content**, and §10 does not change that. The stamp exists so *you* can order,
-attribute, and age what you know — not so a tool can decide what you have outgrown.
+attribute, and age what you know — not so a tool can decide what you have outgrown. (§14 adds the one way an entry
+leaves retrieval: someone tags it superseded and names its replacement. Its age is never the reason.)
 
 ---
 
@@ -610,3 +612,124 @@ frontier model with strong long-context recall. It transfers **downward** exactl
 at that scale or smaller — which is most self-hosted deployments — is in this regime, not near it.
 The routing result has no such caveat: BM25 is a bag of words and cannot see position at all, so
 the cap was a pure defect for every reader.
+
+---
+
+## 14. Superseded, not deleted — and a long layer read in two steps
+
+§13 found that **size** buries a memory: the same facts a 7B reader recovered 100% of the time from a 150-line slice,
+it recovered 17% of the time inside the 551-line file they came from. Splitting files is one fix. This section adds
+the other: read an **entry** at a time instead of a file at a time. It ships together with a second mechanism that
+needs entries for the same reason, retiring a fact that changed without erasing it.
+
+### What an entry is
+
+| shape | example | is an entry? |
+|---|---|---|
+| a heading and what sits under it | `### 2026-06-02 — Monthly billing for the starter tier` + its fields | yes |
+| a top-level bullet that **starts** with its date | `- [2026-05-02] prefers brief answers` · `- 2026-05-02 …` · `- **2026-05-02** …` | yes, one each |
+| domain-knowledge's term bullet | `- **Churn** *[2026-03-03]* — share of accounts lost per month` | yes |
+| a dated **field** inside a record | `- **Review date:** 2026-12-01` under a decision | no: it stays in its decision |
+| a heading with only dated bullets under it | `## Preferences Discovered` | no: a container |
+| an example inside an HTML comment or a code fence | the templates' `<!-- ### YYYY-MM-DD — … -->` | no |
+
+A dated field is not split off because two halves of one topic route worse than the whole (§13). Every entry has an
+id, `<file>#<slug>`: the title's first ten words, lowercased and hyphenated, cut at 64 characters, with `-2`, `-3`
+for repeats. Ids are what the tools print; you never have to compose one.
+
+### The validity tags
+
+```markdown
+- [2026-05-02] prefers brief answers with the number first [superseded: 2026-09-30 → learning-journal.md#2026-09-30-prefers-a-short-paragraph-that-shows-the]
+- [2026-09-30] prefers a short paragraph that shows the reasoning [supersedes: learning-journal.md#2026-05-02-prefers-brief-answers-with-the-number-first]
+```
+
+| field | where it lives |
+|---|---|
+| valid from | the entry's own date, which §10 already requires |
+| invalid at | the date in `[superseded: <date> → <id>]` |
+| superseded by | the id after the arrow (`->` and `by` are accepted too) |
+| supersedes | `[supersedes: <id>]` on the replacement |
+| status | the tag itself. **No tag means active**, so every existing memory file is already valid as it stands |
+
+**Inline, not frontmatter**, for the reason §11 gives for `[patch:]`: one file holds many entries, and memory files
+have no frontmatter. **No separate valid-from field**: §10 already dates every entry, and a second date for the same
+fact is a second place for it to disagree. A tag on a **heading** retires the whole section under it. A tag inside a
+code span, a fence or a comment is documentation, not a tag. Tags never change an id, so marking an entry never
+breaks a pointer to it.
+
+### Writing them: `wick-supersede`
+
+```
+node tools/wick-supersede.mjs <old-id> "<the new fact>"     # write the new entry after the old one, mark the old one
+node tools/wick-supersede.mjs <old-id> --by <new-id>        # the new entry exists already: link the two
+node tools/wick-supersede.mjs <old-id> "<the new fact>" --dry
+```
+
+- The new entry takes the **old one's shape**: a bullet with the same date wrapper, or a heading at the same level
+  with the same date-and-separator. A heading entry gets a `**Replaces:**` line carrying the pointer. That line is
+  load-bearing: `wick-ask` drops a block that is a bare heading, so a decision written as a title alone would be
+  invisible to it while the decision it replaced is hidden.
+- It moves the file's `Updated` stamp, and its index row when the two agreed, to today (§10: a content change).
+- It **refuses, and writes nothing**, for: an entry already superseded (supersede its replacement; the chain is the
+  history), a future date, an id outside `memory/` or on `index.md`, and any edit that would rename an existing entry.
+  The last one is a real case: a new entry whose slug equals a later entry's would take that id and push the later
+  one to `-2`, silently re-pointing every reference to it.
+
+### Reading: hidden by default, one flag away
+
+| tool | what a superseded entry does by default | with `--include-superseded` |
+|---|---|---|
+| `wick-recall "<q>"` | leaves the routing surface | routed on again |
+| `wick-recall --index "<q>"` | not listed | listed, marked `[superseded <date> → <id>]` |
+| `wick-recall --get <id>` | the id resolves to its replacement, following the chain, and says so | the entry itself, marked |
+| `wick-ask "<q>"` | never a source | a source |
+
+**Memory with no tag in it reads byte for byte as before.** On three untagged layers (the shipped templates, a 4-file
+fixture, a 121-file synthetic layer), the code before and after this change printed identical output for 90 of 90
+runs: 30 questions, each through `wick-recall -k 2`, `wick-recall -k 3` and `wick-ask --dry`.
+
+### Reading a long layer in two steps
+
+```
+memory/index.md                                   step 0: the flat file map, read every session (§9)
+node tools/wick-recall.mjs --index "<question>"   step 1: one line per entry from the routed files, at most -n (8)
+node tools/wick-recall.mjs --get <id> [<id> ...]  step 2: the full text of the entries you chose, nothing else
+```
+
+This is claude-mem's progressive disclosure (a short index, then full records only for chosen ids) without its
+timeline step: an entry's date and its place in an append-only file already order it. Step 1 runs §9's router to pick
+the files, then ranks the entries inside them; an entry is never more than one row, so step 1 is bounded by `-n`, not
+by the size of memory.
+
+**Measured (2026-10-20, `tools/wick-selfcheck.mjs`, synthetic text):**
+
+| memory | step 1 output | one row per entry, whole layer |
+|---|---|---|
+| 30,600 entries · 121 files · 3.0 MB | at most **1,422 bytes, 8 rows** (5 questions) | 5.3 MB |
+
+A fact planted at line 55 of a 604-line file came back as the **top row** of step 1, and step 2 returned that entry
+alone. That is the region §13 measured at 0% when the file was read whole.
+
+### The boundary holds
+
+Superseding is not expiry. **Age is never the reason** (§10); a tool never infers that a fact is superseded;
+`wick-supersede` records a decision someone made, with the replacement in hand. Nothing is deleted: the file keeps
+every word, and one flag reads it. That is also the difference from `/forget`, which removes text for privacy and
+leaves a tombstone. Superseding is for a fact that was true and stopped being true.
+
+### Honest limits
+
+- **Step 1's ranking of entries is unmeasured.** Its recall has not been tested on a labelled query set. It runs §9's
+  router first, so a fact the router cannot reach is not in step 1 either. The router reads index rows, headings and
+  bold lead-ins, not bullet prose: in the synthetic layer, 1 of 5 questions matched nothing the router reads and
+  routed nowhere.
+- **The size bound holds by construction** (`-n` rows, each one line) and was measured on generated text, not on a
+  real layer.
+- **`wick-ask` was not re-measured.** Its 17/24 and 24/24 (§9) hold for untagged memory, which reaches it unchanged.
+  It still reads paragraph chunks of the routed files, not step 1's entries. Switching to entries would be a new
+  pipeline, and it would need its own measurement before shipping.
+- **An id comes from a title.** Editing an entry's title by hand changes its id and breaks pointers to it.
+  `wick-supersede` guards only the edits it makes itself.
+- **Only the shapes in the table are entries.** A log of undated bullets stays one section entry. Date them (§10), and
+  each becomes its own.
